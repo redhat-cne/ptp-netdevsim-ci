@@ -262,11 +262,11 @@ run_ginkgo_suite() {
   fi
 
   if [[ "${PTP_GINKGO_MAJOR:-2}" == "1" ]]; then
+    # Ginkgo v1.16 has -keepGoing/-skip/-outputdir but not -junitReport (v2-only).
     ginkgo_args+=(
       -keepGoing
       -v
       -outputdir="${JUNIT_OUTPUT_DIR}"
-      -junitReport="${junit_base}_${mode}_${suite_kind}.xml"
     )
     if [[ -n "${GINKGO_FOCUS}" ]]; then
       ginkgo_args+=(-focus="${GINKGO_FOCUS}")
