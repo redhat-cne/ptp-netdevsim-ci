@@ -48,6 +48,20 @@ fi
 OPERATOR_ROOT="$(cd "${OPERATOR_ROOT}" && pwd)"
 export CI_ROOT OPERATOR_ROOT
 export PTP_TOOLS_DIR="${PTP_TOOLS_DIR:-${CI_ROOT}/ptp-tools}"
+# shellcheck source=lib/operator-compat.sh
+source "${CI_ROOT}/scripts/lib/operator-compat.sh"
+
+if [[ "$RUN_PHASE" == "all" || "$RUN_PHASE" == "deploy" ]]; then
+  _filtered_modes="$(ptp_filter_modes "${TEST_MODES}")"
+  if [[ -z "${_filtered_modes}" ]]; then
+    echo "run-on-vm: no supported clock modes in '${TEST_MODES}' for operator $(ptp_operator_version); skipping Kind deploy/tests."
+    exit 0
+  fi
+  if [[ "${_filtered_modes}" != "${TEST_MODES}" ]]; then
+    echo "run-on-vm: running supported modes '${_filtered_modes}' (requested '${TEST_MODES}')"
+  fi
+  TEST_MODES="${_filtered_modes}"
+fi
 
 # Per-run temp directory shared by all child scripts.
 export PTP_RUN_DIR="${CI_ROOT}/.local-runs/$(date +%Y%m%d-%H%M%S)"
@@ -176,9 +190,10 @@ run_step_rows_begin() {
   STEP_ROWS_TTY_REDRAW=0
   STEP_ROWS_MAX_LABEL_LEN=0
 
-  # stdout is teed to RUN_ON_VM_LOG; use /dev/tty for in-place redraw when interactive.
-  # Skip in CI: /dev/tty may exist but cannot be opened (bash still errors on failed exec).
-  if [[ -z "${CI:-}${GITHUB_ACTIONS:-}${GITLAB_CI:-}${BUILD_ID:-}" ]]; then
+  # stdout is teed to RUN_ON_VM_LOG, so -t 1 is false in this script. Never
+  # open /dev/tty: sudo login shells in GitHub Actions do not inherit
+  # GITHUB_ACTIONS and /dev/tty is not a usable device.
+  if [[ -t 1 && -z "${CI:-}${GITHUB_ACTIONS:-}${GITLAB_CI:-}${BUILD_ID:-}" ]]; then
     set +e
     exec 9>/dev/tty 2>/dev/null
     local _tty_rc=$?

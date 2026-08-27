@@ -106,6 +106,10 @@ PS1="${PS1:-}" source ~/.bashrc
 # Ensure Go modules mode is always used
 export GO111MODULE=on
 
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/operator-compat.sh
+source "${_SCRIPT_DIR}/lib/operator-compat.sh"
+
 OPERATOR_ROOT="${OPERATOR_ROOT:-}"
 if [[ -z "${OPERATOR_ROOT}" ]]; then
   _here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -114,11 +118,13 @@ if [[ -z "${OPERATOR_ROOT}" ]]; then
   fi
 fi
 
-# Install ginkgo. tidy/vendor only when OPERATOR_ROOT is a Go module (operator tree).
+# Install the Ginkgo CLI that matches operator tests. Do not tidy/vendor the
+# operator tree in CI — that rewrites go.mod and breaks pinned deps.
 if [[ -n "${OPERATOR_ROOT}" && -f "${OPERATOR_ROOT}/go.mod" ]]; then
-  (cd "${OPERATOR_ROOT}" && go mod tidy && go mod vendor)
+  ptp_install_ginkgo
+else
+  GOFLAGS=-mod=mod go install github.com/onsi/ginkgo/v2/ginkgo@v2.23.3
 fi
-GOFLAGS=-mod=mod go install github.com/onsi/ginkgo/v2/ginkgo
 
 # Install kind
 curl -Lo ./kind "https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-${GOARCH}"

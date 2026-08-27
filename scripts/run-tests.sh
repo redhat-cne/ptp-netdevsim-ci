@@ -32,6 +32,8 @@ if [[ -z "${OPERATOR_ROOT}" ]]; then
 fi
 OPERATOR_ROOT="$(cd "${OPERATOR_ROOT}" && pwd)"
 export OPERATOR_ROOT
+# shellcheck source=lib/operator-compat.sh
+source "${SCRIPT_DIR}/lib/operator-compat.sh"
 
 usage() {
   echo "Usage: $0 --kind <serial|parallel|both> --mode <modes> [--focus <regex>] [--loglevel <level>] [--linuxptp-daemon-image <url>] [--must-gather-image <url>]"
@@ -75,16 +77,12 @@ fi
 
 JUNIT_OUTPUT_DIR="${JUNIT_OUTPUT_DIR:-/tmp/artifacts}"
 JUNIT_OUTPUT_FILE="${JUNIT_OUTPUT_FILE:-unit_report.xml}"
-SUITE="${OPERATOR_ROOT}/test/conformance"
 export KUBECONFIG=${KUBECONFIG:-~/.kube/config}
 
-# Install ginkgo (use -mod=mod since a vendor directory may exist)
-GOFLAGS=-mod=mod go install github.com/onsi/ginkgo/v2/ginkgo
-
-# Sync dependencies for the operator test module
-cd "${OPERATOR_ROOT}/test"
-go mod tidy
-cd -
+# Match Ginkgo CLI to the operator tests; bump l2discovery-lib when helpers
+# need PTPCaps fields that the pinned module tag does not ship.
+ptp_align_l2discovery
+ptp_install_ginkgo
 
 mkdir -p "$JUNIT_OUTPUT_DIR"
 
@@ -155,18 +153,12 @@ if [[ -n "${LINUXPTP_DAEMON_IMAGE}" ]]; then
   export CNF_TESTS_IMAGE="${LINUXPTP_DAEMON_IMAGE##*/}"
 fi
 
-IFS=',' read -r -a TEST_MODES <<< "${TEST_MODES_RAW}"
-
-SKIP_PATTERNS=(
-  ".*The interfaces supporting ptp can be discovered correctly.*"
-  "Negative - run pmc in a new unprivileged pod on the slave node.*"
-)
-
-if [[ -z "${LINUXPTP_DAEMON_IMAGE}" ]]; then
-  SKIP_PATTERNS+=(
-    "Run pmc in a new pod on the slave node.*"
-  )
+TEST_MODES_RAW="$(ptp_filter_modes "${TEST_MODES_RAW}")"
+if [[ -z "${TEST_MODES_RAW}" ]]; then
+  echo "No supported clock modes requested for operator $(ptp_operator_version); skipping tests."
+  exit 0
 fi
+IFS=',' read -r -a TEST_MODES <<< "${TEST_MODES_RAW}"
 
 case "${RUN_KIND}" in
   serial|parallel|both) ;;
@@ -188,6 +180,10 @@ run_must_gather() {
   fi
   MUST_GATHER_RAN=true
 
+  if ! command -v oc >/dev/null 2>&1 || ! oc adm --help >/dev/null 2>&1; then
+    echo "oc adm is not available (kubectl-only PATH), skipping must-gather."
+    return 0
+  fi
   echo "Running must-gather with image: ${MUST_GATHER_IMAGE}"
   oc adm must-gather \
     --image="${MUST_GATHER_IMAGE}" \
@@ -246,42 +242,75 @@ set -e
 run_ginkgo_suite() {
   local mode="$1"
   local suite_kind="$2"
-  local junit_base="${JUNIT_OUTPUT_FILE%.xml}"
-  local ginkgo_args=(
-    --keep-going
-    --flake-attempts="${FLAKE_ATTEMPTS:-2}"
-    --output-dir="${JUNIT_OUTPUT_DIR}"
-    --junit-report="${junit_base}_${mode}_${suite_kind}.xml"
-    -v
-  )
-
-  if [[ -n "${GINKGO_FOCUS}" ]]; then
-    ginkgo_args+=(--focus="${GINKGO_FOCUS}")
+  local suite_path
+  suite_path="$(ptp_conformance_suite_path "${suite_kind}")"
+  if [[ -z "${suite_path}" ]]; then
+    echo "No ${suite_kind} conformance suite under ${OPERATOR_ROOT}/test/conformance; skipping."
+    return 0
   fi
 
-  for skip in "${SKIP_PATTERNS[@]}"; do
-    ginkgo_args+=(--skip="${skip}")
-  done
+  local junit_base="${JUNIT_OUTPUT_FILE%.xml}"
+  local ginkgo_args=()
+  local skip_patterns=()
+  local skip
+
+  while IFS= read -r skip; do
+    [[ -n "${skip}" ]] && skip_patterns+=("${skip}")
+  done < <(ptp_kind_skip_patterns "${mode}")
+  if [[ -z "${LINUXPTP_DAEMON_IMAGE}" ]]; then
+    skip_patterns+=("Run pmc in a new pod on the slave node.*")
+  fi
+
+  if [[ "${PTP_GINKGO_MAJOR:-2}" == "1" ]]; then
+    ginkgo_args+=(
+      -keepGoing
+      -v
+      -outputdir="${JUNIT_OUTPUT_DIR}"
+      -junitReport="${junit_base}_${mode}_${suite_kind}.xml"
+    )
+    if [[ -n "${GINKGO_FOCUS}" ]]; then
+      ginkgo_args+=(-focus="${GINKGO_FOCUS}")
+    fi
+    for skip in "${skip_patterns[@]}"; do
+      ginkgo_args+=(-skip="${skip}")
+    done
+  else
+    ginkgo_args+=(
+      --keep-going
+      --flake-attempts="${FLAKE_ATTEMPTS:-2}"
+      --output-dir="${JUNIT_OUTPUT_DIR}"
+      --junit-report="${junit_base}_${mode}_${suite_kind}.xml"
+      -v
+    )
+    if [[ -n "${GINKGO_FOCUS}" ]]; then
+      ginkgo_args+=(--focus="${GINKGO_FOCUS}")
+    fi
+    for skip in "${skip_patterns[@]}"; do
+      ginkgo_args+=(--skip="${skip}")
+    done
+  fi
+
+  echo "Running ginkgo v${PTP_GINKGO_MAJOR:-2} ${suite_kind} mode=${mode} suite=${suite_path} operator=$(ptp_operator_version)"
 
   local ginkgo_rc
   set +e
   if [[ "${PTP_GINKGO_HEADLINE_REWRITE:-1}" != "0" ]] && [[ -f "${GINKGO_HEADLINE_REWRITE}" ]]; then
     case "${suite_kind}" in
       parallel)
-        PTP_TEST_MODE="${mode}" ginkgo -p "${ginkgo_args[@]}" "${SUITE}/parallel" 2>&1 | bash "${GINKGO_HEADLINE_REWRITE}"
+        PTP_TEST_MODE="${mode}" ginkgo -p "${ginkgo_args[@]}" "${suite_path}" 2>&1 | bash "${GINKGO_HEADLINE_REWRITE}"
         ;;
       *)
-        PTP_TEST_MODE="${mode}" ginkgo "${ginkgo_args[@]}" "${SUITE}/serial" 2>&1 | bash "${GINKGO_HEADLINE_REWRITE}"
+        PTP_TEST_MODE="${mode}" ginkgo "${ginkgo_args[@]}" "${suite_path}" 2>&1 | bash "${GINKGO_HEADLINE_REWRITE}"
         ;;
     esac
     ginkgo_rc=${PIPESTATUS[0]}
   else
     case "${suite_kind}" in
       parallel)
-        PTP_TEST_MODE="${mode}" ginkgo -p "${ginkgo_args[@]}" "${SUITE}/parallel"
+        PTP_TEST_MODE="${mode}" ginkgo -p "${ginkgo_args[@]}" "${suite_path}"
         ;;
       *)
-        PTP_TEST_MODE="${mode}" ginkgo "${ginkgo_args[@]}" "${SUITE}/serial"
+        PTP_TEST_MODE="${mode}" ginkgo "${ginkgo_args[@]}" "${suite_path}"
         ;;
     esac
     ginkgo_rc=$?
