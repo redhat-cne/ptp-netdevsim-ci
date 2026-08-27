@@ -59,9 +59,10 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: redhat-cne/ptp-netdevsim-ci
-          # Use the SHA of this reusable workflow so callers of @main (or a
-          # commit SHA) get matching scripts, not a stale origin/main.
-          ref: ${{ github.workflow_sha || 'main' }}
+          # Callers pin this reusable workflow at @main. github.workflow_sha is
+          # the *caller* commit (PR merge SHA), which does not exist in this
+          # repo and makes checkout fail with "not our ref".
+          ref: main
           path: ptp-netdevsim-ci
 
       - name: Clone netdevsim-dkms
@@ -210,9 +211,10 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: redhat-cne/ptp-netdevsim-ci
-          # Use the SHA of this reusable workflow so callers of @main (or a
-          # commit SHA) get matching scripts, not a stale origin/main.
-          ref: ${{ github.workflow_sha || 'main' }}
+          # Callers pin this reusable workflow at @main. github.workflow_sha is
+          # the *caller* commit (PR merge SHA), which does not exist in this
+          # repo and makes checkout fail with "not our ref".
+          ref: main
           path: ptp-netdevsim-ci
 
       - name: Checkout operator
@@ -297,9 +299,10 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: redhat-cne/ptp-netdevsim-ci
-          # Use the SHA of this reusable workflow so callers of @main (or a
-          # commit SHA) get matching scripts, not a stale origin/main.
-          ref: ${{ github.workflow_sha || 'main' }}
+          # Callers pin this reusable workflow at @main. github.workflow_sha is
+          # the *caller* commit (PR merge SHA), which does not exist in this
+          # repo and makes checkout fail with "not our ref".
+          ref: main
           path: ptp-netdevsim-ci
 
       - name: Checkout operator
