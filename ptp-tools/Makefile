@@ -37,7 +37,7 @@ else
 CACHE_FLAG ?= --no-cache
 endif
 
-VALUES = lptpd cep ptpop krp openvswitch prometheus ptpmg debug
+VALUES = lptpd cepv2 ptpop krp openvswitch prometheus ptpmg debug
 
 .PHONY: print-values
 print-values:
