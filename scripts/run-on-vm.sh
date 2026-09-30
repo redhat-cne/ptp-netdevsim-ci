@@ -406,13 +406,19 @@ if [[ "$RUN_PHASE" == "load" ]]; then
     read_ptp_tool_images
     TAGS=("${_ptp_tool_images[@]}")
     for t in "${TAGS[@]}"; do
-        podman load -i "${PTP_RUN_DIR}/ptp-images-load/$t.tar"
+        if [[ -f "${PTP_RUN_DIR}/ptp-images-load/$t.tar" ]]; then
+            podman load -i "${PTP_RUN_DIR}/ptp-images-load/$t.tar"
+        else
+            echo "Note: ${PTP_RUN_DIR}/ptp-images-load/$t.tar not present; skipping."
+        fi
     done
 
     OLD_PREFIX=$(podman images --format '{{.Repository}}:{{.Tag}}' | grep ":${TAGS[0]}$" | head -1 | sed "s/:${TAGS[0]}$//")
-    if [[ "$OLD_PREFIX" != "$IMG_PREFIX" ]]; then
+    if [[ -n "$OLD_PREFIX" && "$OLD_PREFIX" != "$IMG_PREFIX" ]]; then
         for t in "${TAGS[@]}"; do
-            podman tag "$OLD_PREFIX:$t" "$IMG_PREFIX:$t"
+            if podman image exists "$OLD_PREFIX:$t" 2>/dev/null; then
+                podman tag "$OLD_PREFIX:$t" "$IMG_PREFIX:$t"
+            fi
         done
     fi
 
@@ -423,7 +429,9 @@ if [[ "$RUN_PHASE" == "load" ]]; then
     run_quiet_with_log_dump_on_failure "create-local-registry" ./create-local-registry.sh "$VM_IP"
 
     for t in "${TAGS[@]}"; do
-        podman push --quiet "$IMG_PREFIX:$t" "docker://$IMG_PREFIX:$t"
+        if podman image exists "$IMG_PREFIX:$t" 2>/dev/null; then
+            podman push --quiet "$IMG_PREFIX:$t" "docker://$IMG_PREFIX:$t"
+        fi
     done
 
 fi

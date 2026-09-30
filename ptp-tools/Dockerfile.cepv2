@@ -1,13 +1,18 @@
 FROM docker.io/golang:1.25.7 AS daemon-builder
-WORKDIR /go/src/github.com/k8snetworkplumbingwg/linuxptp-daemon
+WORKDIR /go/src/github.com/k8snetworkplumbingwg/ptp-operator
 ENV GOMAXPROCS=16
+ENV GO111MODULE=on
 
-RUN git clone -b main https://github.com/k8snetworkplumbingwg/linuxptp-daemon.git  /go/src/github.com/k8snetworkplumbingwg/linuxptp-daemon
+# Copy from the operator checkout (build context is OPERATOR_ROOT).
+COPY . .
 
-RUN make clean && make -j 16
+WORKDIR /go/src/github.com/k8snetworkplumbingwg/ptp-operator/pkg/linuxptp-daemon
+
+RUN ./hack/cleanup.sh && \
+    (go build -ldflags "-X main.GitCommit=$(git rev-list -1 HEAD 2>/dev/null || echo unknown)" --mod=vendor -o bin/cloud-event-proxy ./cmd/cloud-event-proxy || go build -o bin/cloud-event-proxy ./cmd/cloud-event-proxy)
 
 FROM quay.io/centos/centos:stream9
-COPY --from=daemon-builder /go/src/github.com/k8snetworkplumbingwg/linuxptp-daemon/bin/cloud-event-proxy /usr/local/bin/
+COPY --from=daemon-builder /go/src/github.com/k8snetworkplumbingwg/ptp-operator/pkg/linuxptp-daemon/bin/cloud-event-proxy /usr/local/bin/
 LABEL io.k8s.display-name="Cloud Event Proxy v2" \
       io.k8s.description="Cloud Event Proxy (v2) built from linuxptp-daemon, run as an in-daemon event proxy sidecar." \
       io.openshift.tags="openshift" \
