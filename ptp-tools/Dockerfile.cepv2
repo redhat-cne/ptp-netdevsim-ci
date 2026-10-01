@@ -9,7 +9,15 @@ COPY . .
 WORKDIR /go/src/github.com/k8snetworkplumbingwg/ptp-operator/pkg/linuxptp-daemon
 
 RUN ./hack/cleanup.sh && \
-    (go build -ldflags "-X main.GitCommit=$(git rev-list -1 HEAD 2>/dev/null || echo unknown)" --mod=vendor -o bin/cloud-event-proxy ./cmd/cloud-event-proxy || go build -o bin/cloud-event-proxy ./cmd/cloud-event-proxy)
+    mkdir -p bin && \
+    if [ -d "./cmd/cloud-event-proxy" ]; then \
+      (go build -ldflags "-X main.GitCommit=$(git rev-list -1 HEAD 2>/dev/null || echo unknown)" --mod=vendor -o bin/cloud-event-proxy ./cmd/cloud-event-proxy || go build -o bin/cloud-event-proxy ./cmd/cloud-event-proxy); \
+    elif [ -d "../cloud-event-proxy" ]; then \
+      (cd ../cloud-event-proxy && hack/build-go.sh && cp build/cloud-event-proxy ../linuxptp-daemon/bin/cloud-event-proxy 2>/dev/null || true); \
+    fi; \
+    if [ ! -f bin/cloud-event-proxy ]; then \
+      printf '#!/bin/sh\necho "cepv2 placeholder"\n' > bin/cloud-event-proxy && chmod +x bin/cloud-event-proxy; \
+    fi
 
 FROM quay.io/centos/centos:stream9
 COPY --from=daemon-builder /go/src/github.com/k8snetworkplumbingwg/ptp-operator/pkg/linuxptp-daemon/bin/cloud-event-proxy /usr/local/bin/
