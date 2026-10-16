@@ -13,10 +13,14 @@ else
   RELEASE_VERSION="v5.0.0"
 fi
 
-# When ENABLE_CEPV2=true, deploy Cloud Event Proxy v2 (EVENT_PROXY_IMAGE).
-# Omitted/empty keeps CEPv1 sidecar-only behavior.
+# Upstream main dropped SideCarV2 and requires SIDECAR_EVENT_IMAGE to be CEPv2.
+# Older operators still use CEPv1 on SIDECAR and optional CEPv2 on EVENT_PROXY_IMAGE.
+CONTROLLER="${OPERATOR_ROOT}/controllers/ptpoperatorconfig_controller.go"
+SIDECAR_EVENT_IMAGE="$IMG_PREFIX:cep"
 EVENT_PROXY_IMAGE=""
-if [[ "${ENABLE_CEPV2:-}" == "true" ]]; then
+if [[ -f "$CONTROLLER" ]] && ! grep -q 'SideCarV2' "$CONTROLLER"; then
+  SIDECAR_EVENT_IMAGE="$IMG_PREFIX:cepv2"
+elif [[ "${ENABLE_CEPV2:-}" == "true" ]]; then
   EVENT_PROXY_IMAGE="$IMG_PREFIX:cepv2"
 fi
 LINUXPTP_VERBOSITY="${LINUXPTP_VERBOSITY:-10}"
@@ -43,7 +47,7 @@ spec:
             - name: KUBE_RBAC_PROXY_IMAGE
               value: "$IMG_PREFIX:krp"
             - name: SIDECAR_EVENT_IMAGE
-              value: "$IMG_PREFIX:cep"
+              value: "$SIDECAR_EVENT_IMAGE"
             - name: EVENT_PROXY_IMAGE
               value: "$EVENT_PROXY_IMAGE"
             - name: LINUXPTP_VERBOSITY
