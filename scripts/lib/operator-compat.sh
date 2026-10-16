@@ -143,19 +143,30 @@ ptp_install_ginkgo() {
   fi
 }
 
-# test/go.mod sometimes pins l2discovery-lib v0.0.21 while helpers already use
-# PTPCaps.PhcIndex (added in v0.1.0). Bump so ginkgo can compile.
+# test/go.mod sometimes pins an old l2discovery-lib while helpers/tests already
+# need PTPCaps.PhcIndex (v0.1.0+) or solver.StepHasGNSSDevice (v0.1.3+).
 ptp_align_l2discovery() {
-  local dir helper
+  local dir helper need_ver=""
   helper="${OPERATOR_ROOT}/test/pkg/ptphelper/ptphelper.go"
-  [[ -f "$helper" ]] || return 0
-  grep -q 'IfPTPCaps.PhcIndex' "$helper" || return 0
   dir=$(ptp_test_module_dir)
   [[ -f "${dir}/go.mod" ]] || return 0
   grep -q 'github.com/redhat-cne/l2discovery-lib' "${dir}/go.mod" || return 0
-  if grep -qE 'l2discovery-lib v0\.0\.' "${dir}/go.mod"; then
-    echo "Bumping l2discovery-lib to v0.1.1 (PTPCaps.PhcIndex required by tests)"
-    (cd "${dir}" && GOFLAGS=-mod=mod go get github.com/redhat-cne/l2discovery-lib@v0.1.1)
+
+  if grep -Rql --include='*.go' 'StepHasGNSSDevice' "${OPERATOR_ROOT}/test" 2>/dev/null; then
+    need_ver="v0.1.4"
+  elif [[ -f "$helper" ]] && grep -q 'IfPTPCaps.PhcIndex' "$helper"; then
+    need_ver="v0.1.4"
+  else
+    return 0
+  fi
+
+  if grep -qE "l2discovery-lib ${need_ver}([[:space:]]|$)" "${dir}/go.mod"; then
+    return 0
+  fi
+  # Anything older than need_ver (including v0.0.x and v0.1.0–v0.1.2).
+  if grep -qE 'l2discovery-lib v0\.(0\.|1\.[012]([[:space:]]|$))' "${dir}/go.mod"; then
+    echo "Bumping l2discovery-lib to ${need_ver} (required by current tests)"
+    (cd "${dir}" && GOFLAGS=-mod=mod go get "github.com/redhat-cne/l2discovery-lib@${need_ver}")
   fi
 }
 
